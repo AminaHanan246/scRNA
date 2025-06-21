@@ -42,5 +42,26 @@ for (sample in sample_files){
   seurat_obj = CreateSeuratObject(counts = counts, project = sample)
   assign(sample,seurat_obj)
 }
-
+dim(GSM8414917_Combination)
 View(GSM8414918_Control@meta.data)
+
+#=======================================================
+#Merging datasets
+#======================================================
+data_merged = merge(GSM8414918_Control,
+             y = list(GSM8414919_Phenformin,GSM8414920_PolyIC,GSM8414917_Combination),
+             add.cell.ids = c("Control", "Phenformin", "PolyIC", "Combination"),
+             projec = "MergedData"
+)
+View(data_merged@meta.data)
+
+#==========================================
+#Splitting geo id and treat
+#===========================================
+
+split_id = do.call(rbind,strsplit(data_merged$orig.ident,"_"))
+
+data_merged$geo_id = split_id[,1]
+data_merged$treatment = split_id[,2]
+
+
