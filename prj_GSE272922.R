@@ -92,3 +92,34 @@ VlnPlot(data_filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
 
 nrow(data_filtered)           # total number of genes/features
 sum(grepl("^mt-", rownames(data_filtered)))  # how many are mitochondrial
+
+#=================================
+#Normalising before integration
+#=================================
+
+#without integration 
+data_filtered = NormalizeData(data_filtered) #Defaul = logTransformation
+data_filtered = FindVariableFeatures(data_filtered) #exclude housekeeping genes
+
+data_filtered = ScaleData(data_filtered) #equal weight; so that highly expressed genes doesnt dominate
+data_filtered = RunPCA(data_filtered)  #PCA score
+
+#Clustering
+data_filtered = FindNeighbors(data_filtered, dims = 1:30, reduction = "pca") #include clusters with 30 dims
+data_filtered = FindClusters(data_filtered, resolution = 0.8, cluster.name = "unintegrated clusters")
+
+#UMAP
+data_filtered = RunUMAP(data_filtered, dims = 1:30, reduction = "pca", reduction.name = "unintegrated.UMAP")
+DimPlot(data_filtered, reduction = "unintegrated.UMAP", group.by = "seurat_clusters")
+
+#Integration and normalisation
+
+data_filtered = IntegrateLayers(object = data_filtered, method = CCAIntegration, orig.reduction = "pca",new.reduction = "integrated.cca", verbose = FALSE)
+
+data_filtered = FindNeighbors(data_filtered, dims = 1:30, reduction = "integrated.cca")
+data_filtered = FindClusters(data_filtered, resolution = 0.8, cluster.name= "integrated Clusters")
+
+data_filtered = RunUMAP(data_filtered, dims = 1:30, reduction = "integrated.cca", reduction.name = "integrated.UMAP")
+DimPlot(data_filtered, reduction = "integrated.UMAP", group.by = "seurat_clusters")
+
+DimPlot(data_filtered, reduction = "integrated.UMAP", split.by = "treatment", label = TRUE)
