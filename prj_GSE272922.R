@@ -8,17 +8,17 @@ library(tidyverse)
 library(gridExtra)
 library(patchwork)
 library(SeuratObject)
-#=================================
+#========================================================
 #set paths and Sample info
-#==================================
+#========================================================
 base_path = "D:/bioinfo_prj/GSE272922_RAW"
 sample_files = list.files(path = base_path, pattern = "matrix\\.mtx(\\.gz)?$"
 , full.names = FALSE)
 sample_files = sub("matrix\\.mtx(\\.gz)?$", "", sample_files)
 
-#==================================
+#========================================================
 #Read Each sample and create seurat object
-#==================================
+#========================================================
 
 get_file_path = function(base,sample,suffix){
   gz_file = file.path(base, paste0(sample,"_",suffix,".gz"))
@@ -44,9 +44,9 @@ for (sample in sample_files){
 }
 dim(GSM8414917_Combination)
 View(GSM8414918_Control@meta.data)
-#=======================================================
+#========================================================
 #Merging datasets
-#======================================================
+#========================================================
 data_merged = merge(GSM8414918_Control,
              y = list(GSM8414919_Phenformin,GSM8414920_PolyIC,GSM8414917_Combination),
              add.cell.ids = c("Control", "Phenformin", "PolyIC", "Combination"),
@@ -54,18 +54,18 @@ data_merged = merge(GSM8414918_Control,
 )
 View(data_merged@meta.data)
 
-#==========================================
+#========================================================
 #Splitting geo id and treat
-#===========================================
+#========================================================
 
 split_id = do.call(rbind,strsplit(data_merged$orig.ident,"_"))
 
 data_merged$geo_id = split_id[,1]
 data_merged$treatment = split_id[,2]
 
-#===========================================
+#========================================================
 #QC and filtering https://www.sc-best-practices.org/preprocessing_visualization/quality_control.html
-#===========================================
+#========================================================
 
 #low quality bases - high mit contamination
 data_merged[["percent.mt"]] <- PercentageFeatureSet(data_merged, pattern = "^mt-") #mouse is ^mt-
@@ -93,17 +93,17 @@ nrow(data_filtered)           # total number of genes/features
 sum(grepl("^mt-", rownames(data_filtered)))  # how many are mitochondrial
 Assays(data_filtered)
 
-#=================================
+#========================================================
 #Normalisation
-#=================================
-data_filtered = JoinLayers(data_filtered)
+#========================================================
+data_filtered = JoinLayers(data_filtered) #multiple treatment
 data_filtered = NormalizeData(data_filtered) #Default = logTransformation
 data_filtered = FindVariableFeatures(data_filtered) #exclude housekeeping genes
 data_filtered = ScaleData(data_filtered) #equal weight; so that highly expressed genes doesnt dominate
 
-#=================================
+#========================================================
 #DEGS
-#=================================
+#========================================================
 data_deg = data_filtered 
 DefaultAssay(data_deg) <- "RNA"
 
@@ -121,7 +121,7 @@ write.csv(deg_polyic, file = "deg_polyIC_vs_control.csv")
 write.csv(deg_comb, file = "deg_combination_vs_control.csv")
 
 
-#===================================================================
+#========================================================
 #Clustering
 #========================================================
 
@@ -144,6 +144,17 @@ data_filtered = FindNeighbors(data_filtered, dims = 1:30, reduction = "integrate
 data_filtered = FindClusters(data_filtered, resolution = 0.8, cluster.name= "integrated Clusters")
 
 data_filtered = RunUMAP(data_filtered, dims = 1:30, reduction = "integrated.cca", reduction.name = "integrated.UMAP")
-DimPlot(data_filtered, reduction = "integrated.UMAP", group.by = "seurat_clusters")
+DimPlot(data_filtered, reduction = "integrated.UMAP", group.by = "seurat_clusters", split.by = 'treatments')
 ggsave("UMAP_integrated_by_treatment.png")
+
+#========================================================
+#Cell annotation
+#========================================================
+
+
+
+
+
+
+
 
