@@ -44,14 +44,13 @@ for (sample in sample_files){
 }
 dim(GSM8414917_Combination)
 View(GSM8414918_Control@meta.data)
-
 #=======================================================
 #Merging datasets
 #======================================================
 data_merged = merge(GSM8414918_Control,
              y = list(GSM8414919_Phenformin,GSM8414920_PolyIC,GSM8414917_Combination),
              add.cell.ids = c("Control", "Phenformin", "PolyIC", "Combination"),
-             projec = "MergedData"
+             project = "MergedData"
 )
 View(data_merged@meta.data)
 
@@ -92,28 +91,53 @@ VlnPlot(data_filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
 
 nrow(data_filtered)           # total number of genes/features
 sum(grepl("^mt-", rownames(data_filtered)))  # how many are mitochondrial
+Assays(data_filtered)
 
 #=================================
-#Normalising before integration
+#Normalisation
 #=================================
-
-#without integration 
-data_filtered = NormalizeData(data_filtered) #Defaul = logTransformation
+data_filtered = JoinLayers(data_filtered)
+data_filtered = NormalizeData(data_filtered) #Default = logTransformation
 data_filtered = FindVariableFeatures(data_filtered) #exclude housekeeping genes
-
 data_filtered = ScaleData(data_filtered) #equal weight; so that highly expressed genes doesnt dominate
-data_filtered = RunPCA(data_filtered)  #PCA score
 
+#=================================
+#DEGS
+#=================================
+data_deg = data_filtered 
+DefaultAssay(data_deg) <- "RNA"
+
+Idents(data_deg) <- "treatment"
+
+deg_phenf = FindMarkers(data_deg, group.by = "treatment",
+            ident.1 = "Phenformin", ident.2 = "Control")
+deg_polyic = FindMarkers(data_deg, group.by = "treatment",
+            ident.1 = "PolyIC", ident.2 = "Control")
+deg_comb = FindMarkers(data_deg, group.by = "treatment",
+            ident.1 = "Combination", ident.2 = "Control")
+# Save DEG results to CSV files
+write.csv(deg_phenf, file = "deg_phenformin_vs_control.csv")
+write.csv(deg_polyic, file = "deg_polyIC_vs_control.csv")
+write.csv(deg_comb, file = "deg_combination_vs_control.csv")
+
+
+#===================================================================
 #Clustering
+#========================================================
+
+data_filtered = RunPCA(data_filtered) #Default = logTransformation
+
+#without integration
 data_filtered = FindNeighbors(data_filtered, dims = 1:30, reduction = "pca") #include clusters with 30 dims
 data_filtered = FindClusters(data_filtered, resolution = 0.8, cluster.name = "unintegrated clusters")
 
-#UMAP
+#UMAP - w/o integration
 data_filtered = RunUMAP(data_filtered, dims = 1:30, reduction = "pca", reduction.name = "unintegrated.UMAP")
-DimPlot(data_filtered, reduction = "unintegrated.UMAP", group.by = "seurat_clusters")
+DimPlot(data_filtered, reduction = "unintegrated.UMAP", group.by = "treatment")
+ggsave("UMAP_unintegrated_by_treatment.png")
+
 
 #Integration and normalisation
-
 data_filtered = IntegrateLayers(object = data_filtered, method = CCAIntegration, orig.reduction = "pca",new.reduction = "integrated.cca", verbose = FALSE)
 
 data_filtered = FindNeighbors(data_filtered, dims = 1:30, reduction = "integrated.cca")
@@ -121,5 +145,5 @@ data_filtered = FindClusters(data_filtered, resolution = 0.8, cluster.name= "int
 
 data_filtered = RunUMAP(data_filtered, dims = 1:30, reduction = "integrated.cca", reduction.name = "integrated.UMAP")
 DimPlot(data_filtered, reduction = "integrated.UMAP", group.by = "seurat_clusters")
+ggsave("UMAP_integrated_by_treatment.png")
 
-DimPlot(data_filtered, reduction = "integrated.UMAP", split.by = "treatment", label = TRUE)
