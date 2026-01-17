@@ -26,15 +26,16 @@ The goal of this project is to analyse single-cell RNA-seq data murine breast ca
 
 ---
 ## QC and filtering
-
-| <img src="results/QC_vlnplot.png" width="400"> | <img src="results/QC_scatterplot.png" width="400"> |
-
+<p float="left">
+  <img src="results/QC_vlnplot.png" width="400">
+  <img src="results/QC_scatterplot.png" width="400">
+</p>
 *Figure 1: Data was filtered for cells with 200 < nFeature_RNA < 5000 and percent.mt < 10%.*
 The hump of the violin plot and deviation from the line occurs around 5000 features. Thus the data was filtered below 200 and above 5000 features while keeping gene with mitochondrial content at limit of 10%.
 
 ## Batch effect
 <p align="center">
-  <img src="results/UMAP_unintegrated_by_treatment.png" width="700">
+  <img src="results/UMAP_unintegrated_by_treatment.png" width="400">
   <br>
   <b>Figure 2: Unintegrated UMAP colored by Treatment.</b>
 </p>
