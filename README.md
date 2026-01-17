@@ -28,17 +28,17 @@ The goal of this project is to analyse single-cell RNA-seq data murine breast ca
 ## QC and filtering
 
 <div style="text-align: left;">
-<img src="results/QC_vlnplot.png" alt="Pathways enriched by DEGs in LNCAP " width="200"/>
+<img src="results/QC_vlnplot.png" alt="Pathways enriched by DEGs in LNCAP " width="300"/>
 </div>
 <div style="text-align: right;">
-<img src="results/QC_scatterplot.png" alt="Pathways enriched by DEGs in LNCAP " width="200"/>
+<img src="results/QC_scatterplot.png" alt="Pathways enriched by DEGs in LNCAP " width="300"/>
 </div>
 
 The hump of the violin plot and deviation from the line occurs around 5000 features. Thus the data was filtered below 200 and above 5000 features while keeping gene with mitochondrial content at limit of 10%.
 
 ## Batch effect
 <div style="text-align: center;">
-<img src="results/UMAP_unintegrated_by_treatment.png" alt="Pathways enriched by DEGs in LNCAP " width="200"/>
+<img src="results/UMAP_unintegrated_by_treatment.png" alt="Pathways enriched by DEGs in LNCAP " width="400"/>
 </div>
 The unintegrated UMAP show unbiased clustering across treatments. Therefore integration of data is skipped.
 
