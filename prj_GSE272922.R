@@ -8,11 +8,27 @@ library(tidyverse)
 library(gridExtra)
 library(patchwork)
 library(SeuratObject)
+install_if_missing <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    message(paste("Installing package:", pkg))
+    install.packages(pkg, dependencies = TRUE)
+  }
+  library(pkg, character.only = TRUE)
+}
+#BiocManager::install("Seurat")
+
+install.packages("vctrs")
+library(celldex)
+library(SingleR)
+update.packages(ask = FALSE, checkConfluence = TRUE)
+
 #========================================================
 #set paths and Sample info
 #========================================================
+getwd()
 base_path = "D:/BI_prj/scrna_proj/neutrophils_BC/GSE272922_RAW"
-sample_files = list.files(path = base_path, pattern = "matrix\\.mtx(\\.gz)?$"
+setwd("D:/BI_prj/scrna_proj/neutrophils_BC")
+Nsample_files = list.files(path = base_path, pattern = "matrix\\.mtx(\\.gz)?$"
 , full.names = FALSE)
 sample_files = sub("_matrix\\.mtx(\\.gz)?$", "", sample_files)
 
@@ -73,7 +89,7 @@ head(rownames(data_merged), 20)
 QCp1<-VlnPlot(data_merged, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
 ggsave("results/QC_vlnplot.png", bg = "white", plot = QCp1, width = 8, height = 6, dpi = 300)
 
-QCp2<-FeatureScatter(data_merged, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") +
+QCp2<-FeatureScatter(data_merged, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")+
   geom_smooth(method = 'lm')
 ggsave("results/QC_scatterplot.png", bg = "white", plot = QCp2, width = 8, height = 6, dpi = 300)
 
@@ -92,6 +108,9 @@ VlnPlot(data_filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
 nrow(data_filtered)           # total number of genes/features
 sum(grepl("^mt-", rownames(data_filtered)))  # how many are mitochondrial
 Assays(data_filtered)
+#========================================================
+#Doublet detection
+#========================================================
 
 #========================================================
 #Normalisation
@@ -122,12 +141,26 @@ DimPlot(data_filtered, reduction = "unintegrated.UMAP")
 ggsave("results/UMAP.png")
 
 #========================================================
-#Cell annotation
+#Cell annotation using SingleR
 #========================================================
+install_if_missing("celldex")
+ref <- celldex::ImmGenData() #for mice data
+ref$label.main
 
+library(SingleR)
+mbc_counts <-data_filtered[["RNA"]]$data
+res<-SingleR(test = mbc_counts, ref = ref, labels = ref$label.main)
 
+table(res$labels)
 
+data_filtered$labels <- res[match(rownames(data_filtered@meta.data),rownames(res)),'labels']
+View(data_filtered@meta.data)
 
+DimPlot(data_filtered, reduction = "unintegrated.UMAP", group.by = 'labels', label = TRUE)
+
+res
+
+# Manual Annotation confirmation
 FeaturePlot(data_filtered, 
             features = c("S100a8", "Ly6g", "Cd3e", "Adgre1"), 
             reduction = "unintegrated.UMAP")
