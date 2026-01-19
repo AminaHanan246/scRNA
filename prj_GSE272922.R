@@ -28,7 +28,7 @@ update.packages(ask = FALSE, checkConfluence = TRUE)
 getwd()
 base_path = "D:/BI_prj/scrna_proj/neutrophils_BC/GSE272922_RAW"
 setwd("D:/BI_prj/scrna_proj/neutrophils_BC")
-Nsample_files = list.files(path = base_path, pattern = "matrix\\.mtx(\\.gz)?$"
+sample_files = list.files(path = base_path, pattern = "matrix\\.mtx(\\.gz)?$"
 , full.names = FALSE)
 sample_files = sub("_matrix\\.mtx(\\.gz)?$", "", sample_files)
 
@@ -57,7 +57,9 @@ for (sample in sample_files){
     cells = get_file_path(base_path,sample,"barcodes.tsv")
   )
   seurat_obj = CreateSeuratObject(counts = counts, project = "MBC", min.cells = 3, min.features = 200)
+  sample<-gsub("GSM[0-9]+_","", sample)
   assign(sample,seurat_obj)
+  
 }
 dim(GSM8414917_Combination)
 View(GSM8414918_Control@meta.data)
@@ -65,8 +67,8 @@ View(GSM8414918_Control@meta.data)
 #Merging datasets
 #========================================================
 ls()
-data_merged = merge(GSM8414918_Control,
-             y = list(GSM8414919_Phenformin,GSM8414920_PolyIC,GSM8414917_Combination),
+data_merged = merge(Control,
+             y = list(Phenformin,PolyIC,Combination),
              add.cell.ids = c("Control", "Phenformin", "PolyIC", "Combination"),
              project = "MBC"
 )
@@ -85,6 +87,7 @@ data_merged[["percent.mt"]] <- PercentageFeatureSet(data_merged, pattern = "^mt-
 sum(grepl("^mt-", rownames(data_merged)))
 head(rownames(data_merged), 20)
 
+n_before <- ncol(data_merged)
 
 QCp1<-VlnPlot(data_merged, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
 ggsave("results/QC_vlnplot.png", bg = "white", plot = QCp1, width = 8, height = 6, dpi = 300)
@@ -100,21 +103,136 @@ quantile(data_merged$percent.mt, probs = c(0.01, 0.99))
 
 data_filtered <- subset(
   data_merged,
-  subset = nFeature_RNA > 200 & nFeature_RNA < 5000 & percent.mt < 10)
-
-# Visualize QC metrics as a violin plot
-VlnPlot(data_filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
-
-nrow(data_filtered)           # total number of genes/features
-sum(grepl("^mt-", rownames(data_filtered)))  # how many are mitochondrial
-Assays(data_filtered)
+  subset = nFeature_RNA > 200 & percent.mt < 10)
+n_man <- ncol(data_filtered)
+View(data_filtered@meta.data)
 #========================================================
-#Doublet detection
+#Treatment-wise - Ambient RNA and Doublet filtering
 #========================================================
+ls()
+sample_list <- SplitObject(data_filtered, split.by = "Treatment")
+
+samples <- names(sample_list)
+
+doublet_removed <- list()
+
+# Sample-wise preprocessing and doublet detection
+for (sample in samples) {
+  raw_name <- paste0(sample,"_object")
+  norm_name <- paste0(sample,"_normalised")
+  
+  sample_obj <- get(raw_name)
+  og_obj <- sample_obj
+  #========================================================
+  #Ambient RNA removal using SoupX
+  #========================================================
+  #For raw counts
+  prefix <- list.files(path = base_path, pattern = paste0(sample,"_matrix"), full.names = FALSE)
+  prefix <- sub("_matrix\\.mtx(\\.gz)?$", "", prefix)
+  
+  raw_counts = ReadMtx(
+    mtx = get_file_path(base_path,prefix,"matrix.mtx"),
+    features = get_file_path(base_path,prefix,"features.tsv"),
+    cells = get_file_path(base_path,prefix,"barcodes.tsv")
+  )
+
+  # Intialising soup Channel
+  sc = SoupChannel(raw_counts,sample_obj[["RNA"]]$counts)
+  
+  tmp_obj <- NormalizeData(sample_obj) #Default = logTransformation
+  tmp_obj <- FindVariableFeatures(tmp_obj) #exclude housekeeping genes
+  tmp_obj <- ScaleData(tmp_obj)
+  tmp_obj <- RunPCA(tmp_obj)
+  
+  #Find significant PCs
+  stdv <- tmp_obj[["pca"]]@stdev
+  percent_var <- (stdv^2/sum(stdv^2)) * 100
+  cumulative_var <- cumsum(percent_var)
+  co1 <- which(cumulative_var > 90)[1]
+  co2 <- which(diff(percent_var) < 0.1)[1] + 1
+  min_pc <- min(co1, co2)
+  
+  tmp_obj <- RunUMAP(tmp_obj, dims = 1:min_pc)
+  tmp_obj <- FindNeighbors(object = tmp_obj, dims = 1:min_pc)              
+  tmp_obj <- FindClusters(object = tmp_obj, resolution = 0.1)
+  
+  sc = setClusters(sc, setNames(tmp_obj$seurat_clusters, colnames(tmp_obj)))
+  sc = autoEstCont(sc) # Automatically estimates contamination rate
+  out = adjustCounts(sc) # Produces "cleaned" counts
+  
+  # Create the actual working object with the cleaned counts
+  sample_obj <- CreateSeuratObject(counts = out, project = sample)
+  # Transfer mitochondria
+  sample_obj[["percent.mt"]] <- og_obj[["percent.mt"]]
+  
+  rm(og_obj,raw_counts, tmp_obj)
+  gc()
+  #========================================================
+  #Doublet detection using doublet finder
+  #========================================================
+  
+  sample_obj = NormalizeData(sample_obj) #Default = logTransformation
+  sample_obj = FindVariableFeatures(sample_obj) #exclude housekeeping genes
+  sample_obj = ScaleData(sample_obj)
+  sample_obj = RunPCA(sample_obj)
+  
+  #Find significant PCs
+  stdv <- sample_obj[["pca"]]@stdev
+  percent_var <- (stdv^2/sum(stdv^2)) * 100
+  cumulative_var <- cumsum(percent_var)
+  co1 <- which(cumulative_var > 90)[1]
+  co2 <- which(diff(percent_var) < 0.1)[1] + 1
+  min_pc <- min(co1, co2)
+  
+  sample_obj <- RunUMAP(sample_obj, dims = 1:min_pc)
+  sample_obj <- FindNeighbors(object = sample_obj, dims = 1:min_pc)              
+  sample_obj <- FindClusters(object = sample_obj, resolution = 0.1)
+  
+  #Find the optimal pK value using paramsweep
+  sweep_list <- paramSweep(sample_obj, PCs = 1:min_pc, sct = FALSE)   
+  sweep_stats <- summarizeSweep(sweep_list)
+  bcmvn <- find.pK(sweep_stats) # computes a metric to find the optimal pK value (max mean variance normalised by modality coefficient)
+  # Optimal pK is the max of the bimodality coefficient (BCmvn) distribution
+  optimal.pk <- bcmvn %>% 
+    dplyr::filter(BCmetric == max(BCmetric)) %>%
+    dplyr::select(pK)
+  optimal.pk <- as.numeric(as.character(optimal.pk[[1]]))
+  
+  # Homotypic Doublet proportion estimate - for nexp
+  annotations <- sample_obj@meta.data$seurat_clusters 
+  homotypic.prop <- modelHomotypic(annotations) # get proportions of homotypic doublets
+  
+  ## Recovered cells ~10000
+  multiplet_rate <- 0.076
+  nExp.poi <- round(multiplet_rate * nrow(sample_obj@meta.data)) # multiply by number of cells to get the number of expected multiplets
+  nExp.poi.adj <- round(nExp.poi * (1 - homotypic.prop)) # expected number of doublets
+  
+  # Running doublet finder
+  sample_obj <- doubletFinder_v3(seu = sample_obj, 
+                          PCs = 1:min_pc, 
+                          pK = optimal.pk, # the neighborhood size used to compute the number of artificial nearest neighbours
+                          nExp = nExp.poi.adj) # number of expected real doublets
+  
+  # DoubletFinder adds a metadata column starting with "DF.classifications"
+  df_column <- grep("DF.classifications", colnames(sample_obj@meta.data), value = TRUE)
+  sample_obj <- subset(sample_obj, subset = get(df_column) == "Singlet")
+  
+  doublet_removed[[sample]] <- sample_obj
+  gc()
+  }
+
+#Merging doublet removed datasets
+data_merged_DR <- merge(doublet_removed[[1]],
+                    y = doublet_removed[[2:length(doublet_removed)]],
+                    add.cell.ids = names(doublet_removed),
+                    project = "MBC_DR"
+                    )
+n_DR<- ncol(data_merged_DR)
 
 #========================================================
 #Normalisation
 #========================================================
+data_filtered <- data_merged_DR
 data_filtered = JoinLayers(data_filtered) #multiple treatment
 data_filtered = NormalizeData(data_filtered, normalization.method = 'LogNormalize', scale.factor = 10000) #Default = logTransformation
 data_filtered = FindVariableFeatures(data_filtered, selection.method = 'vst', nfeatures = 2000) #exclude housekeeping genes
