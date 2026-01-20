@@ -17,11 +17,11 @@ install_if_missing <- function(pkg) {
 }
 #BiocManager::install("Seurat")
 
-install.packages("vctrs")
+#install.packages("vctrs")
 library(celldex)
 library(SingleR)
-update.packages(ask = FALSE, checkConfluence = TRUE)
-
+#update.packages(ask = FALSE, checkConfluence = TRUE)
+#remotes::install_github('chris-mcginnis-ucsf/DoubletFinder')
 #========================================================
 #set paths and Sample info
 #========================================================
@@ -61,25 +61,23 @@ for (sample in sample_files){
   assign(sample,seurat_obj)
   
 }
-dim(GSM8414917_Combination)
-View(GSM8414918_Control@meta.data)
 #========================================================
 #Merging datasets
 #========================================================
 ls()
+
 data_merged = merge(Control,
              y = list(Phenformin,PolyIC,Combination),
              add.cell.ids = c("Control", "Phenformin", "PolyIC", "Combination"),
              project = "MBC"
 )
 View(data_merged@meta.data)
+rm("Control", "Phenformin", "PolyIC", "Combination")
+gc()
+#Merging sample data
 data_merged$sample <-rownames(data_merged@meta.data)
 data_merged@meta.data<- separate(data_merged@meta.data, col = 'sample', into = c('Treatment','Barcode'),
          sep = '_')
-
-#========================================================
-#QC and filtering https://www.sc-best-practices.org/preprocessing_visualization/quality_control.html
-#========================================================
 
 #low quality bases - high mit contamination
 data_merged[["percent.mt"]] <- PercentageFeatureSet(data_merged, pattern = "^mt-") #mouse is ^mt-
@@ -87,7 +85,19 @@ data_merged[["percent.mt"]] <- PercentageFeatureSet(data_merged, pattern = "^mt-
 sum(grepl("^mt-", rownames(data_merged)))
 head(rownames(data_merged), 20)
 
+#========================================================
+#QC and filtering https://www.sc-best-practices.org/preprocessing_visualization/quality_control.html
+#========================================================
+#summary table
+qc_log <- data.frame(
+  Step = c("Before", "Manual", "SoupX", "Doublet Finder"),
+  Removed = 0,
+  Remaining = 0
+)
+
+#Count cell before filtering
 n_before <- ncol(data_merged)
+qc_log[qc_log$Step == "Before", "Remaining"] <- n_before
 
 QCp1<-VlnPlot(data_merged, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
 ggsave("results/QC_vlnplot.png", bg = "white", plot = QCp1, width = 8, height = 6, dpi = 300)
@@ -100,20 +110,35 @@ quantile(data_merged$nFeature_RNA, probs = c(0.01, 0.99))
 quantile(data_merged$nCount_RNA, probs = c(0.01, 0.99))
 quantile(data_merged$percent.mt, probs = c(0.01, 0.99))
 
-
+# Filtering data using thresholds
 data_filtered <- subset(
   data_merged,
   subset = nFeature_RNA > 200 & percent.mt < 10)
+
+#Count cell after manual filtering
 n_man <- ncol(data_filtered)
+rem_man <- n_before - n_man
+qc_log[qc_log$Step == "Manual", "Remaining"] <- n_man
+qc_log[qc_log$Step == "Manual", "Removed"] <- rem_man
+
+
 View(data_filtered@meta.data)
 #========================================================
 #Treatment-wise - Ambient RNA and Doublet filtering
 #========================================================
-ls()
+library(DoubletFinder)
+library(SoupX)
+
 sample_list <- SplitObject(data_filtered, split.by = "Treatment")
 
 samples <- names(sample_list)
 
+# Count cells after ambiant RNA removal
+n_amb <- 0
+# Count cells after doublet removal
+n_doublets <- 0
+
+# Filtered per sample
 doublet_removed <- list()
 
 # Sample-wise preprocessing and doublet detection
@@ -121,12 +146,13 @@ for (sample in samples) {
   raw_name <- paste0(sample,"_object")
   norm_name <- paste0(sample,"_normalised")
   
-  sample_obj <- get(raw_name)
+  sample_obj <- sample_list[[sample]]
   og_obj <- sample_obj
   #========================================================
   #Ambient RNA removal using SoupX
   #========================================================
   #For raw counts
+  n_amb_rna <- 0
   prefix <- list.files(path = base_path, pattern = paste0(sample,"_matrix"), full.names = FALSE)
   prefix <- sub("_matrix\\.mtx(\\.gz)?$", "", prefix)
   
@@ -135,7 +161,8 @@ for (sample in samples) {
     features = get_file_path(base_path,prefix,"features.tsv"),
     cells = get_file_path(base_path,prefix,"barcodes.tsv")
   )
-
+  raw_counts<- raw_counts[rownames(sample_obj),]
+  
   # Intialising soup Channel
   sc = SoupChannel(raw_counts,sample_obj[["RNA"]]$counts)
   
@@ -144,6 +171,7 @@ for (sample in samples) {
   tmp_obj <- ScaleData(tmp_obj)
   tmp_obj <- RunPCA(tmp_obj)
   
+    
   #Find significant PCs
   stdv <- tmp_obj[["pca"]]@stdev
   percent_var <- (stdv^2/sum(stdv^2)) * 100
@@ -157,11 +185,12 @@ for (sample in samples) {
   tmp_obj <- FindClusters(object = tmp_obj, resolution = 0.1)
   
   sc = setClusters(sc, setNames(tmp_obj$seurat_clusters, colnames(tmp_obj)))
-  sc = autoEstCont(sc) # Automatically estimates contamination rate
+  sc = setContaminationFraction(sc, 0.05) # Automatically estimates contamination rate
   out = adjustCounts(sc) # Produces "cleaned" counts
   
   # Create the actual working object with the cleaned counts
   sample_obj <- CreateSeuratObject(counts = out, project = sample)
+  n_amb <- n_amb + (ncol(sample_obj))
   # Transfer mitochondria
   sample_obj[["percent.mt"]] <- og_obj[["percent.mt"]]
   
@@ -227,7 +256,16 @@ data_merged_DR <- merge(doublet_removed[[1]],
                     add.cell.ids = names(doublet_removed),
                     project = "MBC_DR"
                     )
-n_DR<- ncol(data_merged_DR)
+
+rem_amb <- n_man - n_amb
+qc_log[qc_log$Step == "SoupX", "Remaining"] <- n_amb
+qc_log[qc_log$Step == "SoupX", "Removed"] <- rem_amb
+
+n_droplet <- ncol(data_merged_DR)
+rem_droplet <- n_amb - n_droplet
+qc_log[qc_log$Step == "Droplet Finder", "Remaining"] <- n_droplet
+qc_log[qc_log$Step == "Droplet Finder", "Removed"] <- rem_droplet
+
 
 #========================================================
 #Normalisation
@@ -252,11 +290,11 @@ data_filtered = FindClusters(data_filtered, resolution = 0.5, cluster.name = "un
 #UMAP - w/o integration
 data_filtered = RunUMAP(data_filtered, dims = 1:30, reduction = "pca", reduction.name = "unintegrated.UMAP")
 DimPlot(data_filtered, reduction = "unintegrated.UMAP", group.by = "Treatment")
-ggsave("results/UMAP_unintegrated_by_treatment.png")
+ggsave("results/UMAP_unintegrated_by_treatment_filter.png")
 View(data_filtered@meta.data)
 
 DimPlot(data_filtered, reduction = "unintegrated.UMAP")
-ggsave("results/UMAP.png")
+ggsave("results/UMAP_filter.png")
 
 #========================================================
 #Cell annotation using SingleR
